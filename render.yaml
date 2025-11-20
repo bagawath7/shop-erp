@@ -1,0 +1,68 @@
+services:
+  # PostgreSQL Database
+  - type: pserv
+    name: shop-erp-db
+    env: docker
+    plan: free
+    region: oregon
+    ipAllowList: []
+
+  # Backend API
+  - type: web
+    name: shop-erp-api
+    env: docker
+    region: oregon
+    plan: free
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    envVars:
+      - key: PORT
+        value: 5000
+      - key: DB_HOST
+        fromDatabase:
+          name: shop-erp-db
+          property: host
+      - key: DB_PORT
+        fromDatabase:
+          name: shop-erp-db
+          property: port
+      - key: DB_NAME
+        fromDatabase:
+          name: shop-erp-db
+          property: database
+      - key: DB_USER
+        fromDatabase:
+          name: shop-erp-db
+          property: user
+      - key: DB_PASSWORD
+        fromDatabase:
+          name: shop-erp-db
+          property: password
+      - key: NODE_ENV
+        value: production
+    healthCheckPath: /api/health
+
+  # Frontend Static Site
+  - type: web
+    name: shop-erp-frontend
+    env: static
+    region: oregon
+    buildCommand: cd frontend && npm install && npm run build
+    staticPublishPath: ./frontend/build
+    envVars:
+      - key: REACT_APP_API_URL
+        fromService:
+          type: web
+          name: shop-erp-api
+          envVarKey: RENDER_EXTERNAL_URL
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+
+databases:
+  - name: shop-erp-db
+    databaseName: shop_erp
+    user: shop_erp_user
+    plan: free
+    region: oregon
