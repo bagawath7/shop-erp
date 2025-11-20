@@ -1,12 +1,4 @@
 services:
-  # PostgreSQL Database
-  - type: pserv
-    name: shop-erp-db
-    env: docker
-    plan: free
-    region: oregon
-    ipAllowList: []
-
   # Backend API
   - type: web
     name: shop-erp-api
@@ -46,7 +38,6 @@ services:
   - type: web
     name: shop-erp-frontend
     env: static
-    region: oregon
     buildCommand: cd frontend && npm install && npm run build
     staticPublishPath: ./frontend/build
     envVars:
@@ -65,4 +56,3 @@ databases:
     databaseName: shop_erp
     user: shop_erp_user
     plan: free
-    region: oregon
