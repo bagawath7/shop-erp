@@ -1,119 +1,133 @@
--- Shop ERP Database Initialization Script
--- Run this after deploying to Render to set up the database schema
+-- Shop ERP Database Schema
 
--- Create categories table
+-- Categories Table
 CREATE TABLE IF NOT EXISTS categories (
     id SERIAL PRIMARY KEY,
-    name VARCHAR(255) NOT NULL,
+    name VARCHAR(100) NOT NULL UNIQUE,
     description TEXT,
-    parent_id INTEGER REFERENCES categories(id) ON DELETE CASCADE,
+    parent_id INTEGER REFERENCES categories(id) ON DELETE SET NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Create products table
+-- Products Table
 CREATE TABLE IF NOT EXISTS products (
     id SERIAL PRIMARY KEY,
-    name VARCHAR(255) NOT NULL,
+    name VARCHAR(200) NOT NULL,
     description TEXT,
     category_id INTEGER REFERENCES categories(id) ON DELETE SET NULL,
-    brand VARCHAR(255),
-    is_active BOOLEAN DEFAULT true,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Create skus table (Stock Keeping Units)
+-- SKUs (Stock Keeping Units) Table
 CREATE TABLE IF NOT EXISTS skus (
     id SERIAL PRIMARY KEY,
-    product_id INTEGER REFERENCES products(id) ON DELETE CASCADE,
-    sku_code VARCHAR(100) UNIQUE NOT NULL,
-    variant_name VARCHAR(255),
-    purchase_price DECIMAL(10, 2),
+    product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+    sku_code VARCHAR(50) NOT NULL UNIQUE,
+    variant_name VARCHAR(100),
+    cost_price DECIMAL(10, 2) NOT NULL,
     selling_price DECIMAL(10, 2) NOT NULL,
-    mrp DECIMAL(10, 2),
-    barcode VARCHAR(255) UNIQUE,
+    tax_percentage DECIMAL(5, 2) DEFAULT 0,
     is_active BOOLEAN DEFAULT true,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Create inventory table
+-- Inventory Table
 CREATE TABLE IF NOT EXISTS inventory (
     id SERIAL PRIMARY KEY,
-    sku_id INTEGER REFERENCES skus(id) ON DELETE CASCADE,
-    quantity INTEGER DEFAULT 0,
-    reserved_quantity INTEGER DEFAULT 0,
-    available_quantity INTEGER GENERATED ALWAYS AS (quantity - reserved_quantity) STORED,
-    reorder_level INTEGER DEFAULT 10,
-    max_stock_level INTEGER,
-    location VARCHAR(255),
-    last_restocked_at TIMESTAMP,
+    sku_id INTEGER NOT NULL REFERENCES skus(id) ON DELETE CASCADE,
+    quantity INTEGER NOT NULL DEFAULT 0,
+    minimum_stock_level INTEGER DEFAULT 10,
+    maximum_stock_level INTEGER,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(sku_id, location)
+    UNIQUE(sku_id)
 );
 
--- Create inventory_batches table
+-- Inventory Batches Table
 CREATE TABLE IF NOT EXISTS inventory_batches (
     id SERIAL PRIMARY KEY,
-    inventory_id INTEGER REFERENCES inventory(id) ON DELETE CASCADE,
-    batch_number VARCHAR(100) NOT NULL,
+    sku_id INTEGER NOT NULL REFERENCES skus(id) ON DELETE CASCADE,
+    batch_number VARCHAR(50) NOT NULL,
     quantity INTEGER NOT NULL,
-    purchase_price DECIMAL(10, 2),
     manufacturing_date DATE,
     expiry_date DATE,
-    supplier_name VARCHAR(255),
-    notes TEXT,
+    received_date DATE DEFAULT CURRENT_DATE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(batch_number, sku_id)
 );
 
--- Create stock_movements table
+-- Stock Movements Table
 CREATE TABLE IF NOT EXISTS stock_movements (
     id SERIAL PRIMARY KEY,
-    inventory_id INTEGER REFERENCES inventory(id) ON DELETE CASCADE,
-    movement_type VARCHAR(50) NOT NULL, -- 'in', 'out', 'adjustment', 'transfer', 'return'
+    sku_id INTEGER NOT NULL REFERENCES skus(id) ON DELETE CASCADE,
+    batch_id INTEGER REFERENCES inventory_batches(id) ON DELETE SET NULL,
+    movement_type VARCHAR(20) NOT NULL CHECK (movement_type IN ('IN', 'OUT', 'ADJUSTMENT')),
     quantity INTEGER NOT NULL,
-    reference_number VARCHAR(100),
-    reason TEXT,
-    performed_by VARCHAR(255),
+    reference_number VARCHAR(50),
+    notes TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Create stock_alerts table
+-- Stock Alerts Table
 CREATE TABLE IF NOT EXISTS stock_alerts (
     id SERIAL PRIMARY KEY,
-    inventory_id INTEGER REFERENCES inventory(id) ON DELETE CASCADE,
-    alert_type VARCHAR(50) NOT NULL, -- 'low_stock', 'out_of_stock', 'expiring_soon', 'expired'
-    message TEXT NOT NULL,
-    severity VARCHAR(20) DEFAULT 'medium', -- 'low', 'medium', 'high', 'critical'
+    sku_id INTEGER NOT NULL REFERENCES skus(id) ON DELETE CASCADE,
+    alert_type VARCHAR(20) NOT NULL CHECK (alert_type IN ('LOW_STOCK', 'OUT_OF_STOCK', 'EXPIRING_SOON')),
+    message TEXT,
     is_resolved BOOLEAN DEFAULT false,
-    resolved_at TIMESTAMP,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    resolved_at TIMESTAMP
 );
 
--- Create indexes for better query performance
-CREATE INDEX IF NOT EXISTS idx_categories_parent_id ON categories(parent_id);
-CREATE INDEX IF NOT EXISTS idx_products_category_id ON products(category_id);
-CREATE INDEX IF NOT EXISTS idx_products_is_active ON products(is_active);
-CREATE INDEX IF NOT EXISTS idx_skus_product_id ON skus(product_id);
-CREATE INDEX IF NOT EXISTS idx_skus_sku_code ON skus(sku_code);
-CREATE INDEX IF NOT EXISTS idx_skus_is_active ON skus(is_active);
-CREATE INDEX IF NOT EXISTS idx_inventory_sku_id ON inventory(sku_id);
-CREATE INDEX IF NOT EXISTS idx_inventory_batches_inventory_id ON inventory_batches(inventory_id);
-CREATE INDEX IF NOT EXISTS idx_inventory_batches_expiry_date ON inventory_batches(expiry_date);
-CREATE INDEX IF NOT EXISTS idx_stock_movements_inventory_id ON stock_movements(inventory_id);
-CREATE INDEX IF NOT EXISTS idx_stock_alerts_inventory_id ON stock_alerts(inventory_id);
-CREATE INDEX IF NOT EXISTS idx_stock_alerts_is_resolved ON stock_alerts(is_resolved);
+-- Create indexes for better performance
+CREATE INDEX IF NOT EXISTS idx_products_category ON products(category_id);
+CREATE INDEX IF NOT EXISTS idx_skus_product ON skus(product_id);
+CREATE INDEX IF NOT EXISTS idx_inventory_sku ON inventory(sku_id);
+CREATE INDEX IF NOT EXISTS idx_batches_sku ON inventory_batches(sku_id);
+CREATE INDEX IF NOT EXISTS idx_stock_movements_sku ON stock_movements(sku_id);
+CREATE INDEX IF NOT EXISTS idx_stock_alerts_sku ON stock_alerts(sku_id);
+CREATE INDEX IF NOT EXISTS idx_stock_alerts_unresolved ON stock_alerts(is_resolved) WHERE is_resolved = false;
+
+-- Create trigger function to update updated_at timestamp
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = CURRENT_TIMESTAMP;
+    RETURN NEW;
+END;
+$$ language 'plpgsql';
+
+-- Create triggers for automatic timestamp updates
+DROP TRIGGER IF EXISTS update_categories_updated_at ON categories;
+CREATE TRIGGER update_categories_updated_at BEFORE UPDATE ON categories
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+DROP TRIGGER IF EXISTS update_products_updated_at ON products;
+CREATE TRIGGER update_products_updated_at BEFORE UPDATE ON products
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+DROP TRIGGER IF EXISTS update_skus_updated_at ON skus;
+CREATE TRIGGER update_skus_updated_at BEFORE UPDATE ON skus
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+DROP TRIGGER IF EXISTS update_inventory_updated_at ON inventory;
+CREATE TRIGGER update_inventory_updated_at BEFORE UPDATE ON inventory
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+DROP TRIGGER IF EXISTS update_inventory_batches_updated_at ON inventory_batches;
+CREATE TRIGGER update_inventory_batches_updated_at BEFORE UPDATE ON inventory_batches
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 -- Insert sample data (optional - for demo purposes)
 INSERT INTO categories (name, description) VALUES
     ('Electronics', 'Electronic items and gadgets'),
     ('Clothing', 'Apparel and fashion items'),
     ('Food & Beverages', 'Consumable food and drink products')
-ON CONFLICT DO NOTHING;
+ON CONFLICT (name) DO NOTHING;
 
 -- Success message
 DO $$
